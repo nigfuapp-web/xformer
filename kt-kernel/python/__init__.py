@@ -34,35 +34,49 @@ Environment Variables:
 """
 
 from __future__ import annotations
-
-# Detect CPU and load optimal extension variant
-from ._cpu_detect import initialize as _initialize_cpu
-
-_kt_kernel_ext, __cpu_variant__ = _initialize_cpu()
-
-# Make the extension module available to other modules in this package
 import sys
 
-sys.modules["kt_kernel_ext"] = _kt_kernel_ext
+# Try to load C++ extensions, but don't fail if they're not available
+# This allows using pure Python components (like models) without C++ build
+_kt_kernel_ext = None
+__cpu_variant__ = "none"
+_cpp_extensions_available = False
 
-# Also expose kt_kernel_ext as an attribute for backward compatibility
-kt_kernel_ext = _kt_kernel_ext
+try:
+    from ._cpu_detect import initialize as _initialize_cpu
+    _kt_kernel_ext, __cpu_variant__ = _initialize_cpu()
+    sys.modules["kt_kernel_ext"] = _kt_kernel_ext
+    kt_kernel_ext = _kt_kernel_ext
+    _cpp_extensions_available = True
+except (ImportError, ModuleNotFoundError, OSError) as e:
+    # C++ extensions not available - that's OK for pure Python usage
+    kt_kernel_ext = None
+    import warnings
+    warnings.warn(
+        f"kt-kernel C++ extensions not available ({e}). "
+        "KTMoEWrapper will not work, but models.xoron can still be used.",
+        ImportWarning
+    )
 
-# Import main API
-from .experts import KTMoEWrapper
-from .experts_base import generate_gpu_experts_masks
+# Import main API only if C++ extensions are available
+KTMoEWrapper = None
+generate_gpu_experts_masks = None
+
+if _cpp_extensions_available:
+    try:
+        from .experts import KTMoEWrapper
+        from .experts_base import generate_gpu_experts_masks
+    except ImportError:
+        pass
 
 # Read version from package metadata (preferred) or fallback to project root
 try:
-    # Try to get version from installed package metadata (works in installed environment)
     from importlib.metadata import version, PackageNotFoundError
 
     try:
         __version__ = version("kt-kernel")
     except PackageNotFoundError:
-        # Package not installed, try to read from source tree version.py
         import os
-
         _root_version_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "version.py")
         if os.path.exists(_root_version_file):
             _version_ns = {}
@@ -72,10 +86,8 @@ try:
         else:
             __version__ = "0.4.3"
 except ImportError:
-    # Python < 3.8, fallback to pkg_resources or hardcoded version
     try:
         from pkg_resources import get_distribution, DistributionNotFound
-
         try:
             __version__ = get_distribution("kt-kernel").version
         except DistributionNotFound:
