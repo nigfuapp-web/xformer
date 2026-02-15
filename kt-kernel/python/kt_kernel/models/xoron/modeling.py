@@ -178,7 +178,7 @@ class MultiHeadLatentAttention(nn.Module):
         
         # KV compression projection
         self.kv_a_proj = nn.Linear(hidden_size, kv_lora_rank + self.rope_dim, bias=False)
-        self.kv_b_proj = nn.Linear(kv_lora_rank, self.num_kv_heads * (self.head_dim - self.rope_dim) * 2, bias=False)
+        self.kv_b_proj = nn.Linear(kv_lora_rank, self.num_kv_heads * self.head_dim * 2, bias=False)
         
         # Output projection
         self.o_proj = nn.Linear(num_heads * self.head_dim, hidden_size, bias=False)
@@ -217,12 +217,8 @@ class MultiHeadLatentAttention(nn.Module):
         
         # Decompress KV
         kv = self.kv_b_proj(kv_latent)
-        kv = kv.view(batch_size, seq_len, self.num_kv_heads, 2, self.head_dim - self.rope_dim)
-        k_content, v = kv.unbind(dim=3)
-        
-        # Add RoPE component to K
-        kv_pe = kv_pe.view(batch_size, seq_len, 1, self.rope_dim).expand(-1, -1, self.num_kv_heads, -1)
-        k = torch.cat([kv_pe, k_content], dim=-1)
+        kv = kv.view(batch_size, seq_len, self.num_kv_heads, 2, self.head_dim)
+        k, v = kv.unbind(dim=3)
         
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
@@ -419,7 +415,8 @@ class XoronDecoderLayer(nn.Module):
         self.self_attn = MultiHeadLatentAttention(
             hidden_size=config.hidden_size,
             num_heads=config.num_heads,
-            kv_lora_rank=getattr(config, 'audio_kv_lora_rank', 256),
+            kv_lora_rank=getattr(config, 'kv_lora_rank', 512),
+            rope_dim=getattr(config, 'qk_rope_head_dim', 64),
             max_position_embeddings=config.max_position_embeddings,
         )
         

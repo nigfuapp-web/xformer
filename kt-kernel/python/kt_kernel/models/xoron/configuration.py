@@ -41,9 +41,13 @@ class XoronConfig:
     num_layers: int = 12
     num_heads: int = 16
     intermediate_size: int = 2048
-    vocab_size: int = 151643
+    vocab_size: int = 152200
     max_position_embeddings: int = 131072
     rms_norm_eps: float = 1e-6
+    
+    # MLA (Multi-Head Latent Attention) Configuration
+    kv_lora_rank: int = 512
+    qk_rope_head_dim: int = 64
 
     # Ring Attention
     use_ring_attention: bool = True
