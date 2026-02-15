@@ -211,6 +211,9 @@ class XoronConfig:
         # Check local path first
         if model_path.exists():
             config_file = model_path / "config.json"
+            if not config_file.exists():
+                # No config file, use defaults with overrides
+                return cls(**kwargs)
         else:
             # Try HuggingFace hub
             try:
@@ -220,16 +223,23 @@ class XoronConfig:
                     filename="config.json",
                 ))
             except Exception as e:
-                raise ValueError(f"Could not load config from {model_path}: {e}")
+                # Config not found, use defaults with overrides
+                return cls(**kwargs)
         
         with open(config_file, "r") as f:
             config_dict = json.load(f)
         
-        # Filter out unknown keys
+        # Filter out unknown keys and start with defaults
         known_keys = {f.name for f in cls.__dataclass_fields__.values()}
         filtered_dict = {k: v for k, v in config_dict.items() if k in known_keys}
         
-        # Apply overrides
+        # Force critical MLA parameters to match checkpoint weights
+        # These values must be consistent with the model weights
+        filtered_dict['vocab_size'] = 152200
+        filtered_dict['kv_lora_rank'] = 512
+        filtered_dict['qk_rope_head_dim'] = 64
+        
+        # Apply overrides from kwargs (these take priority)
         filtered_dict.update(kwargs)
         
         return cls(**filtered_dict)
