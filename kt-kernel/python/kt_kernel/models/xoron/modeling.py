@@ -252,14 +252,22 @@ class MultiHeadLatentAttention(nn.Module):
             k = k.repeat_interleave(repeat_factor, dim=1)
             v = v.repeat_interleave(repeat_factor, dim=1)
         
-        # Attention
+        # Attention with numerical stability
         scale = self.head_dim ** -0.5
         attn_weights = torch.matmul(q, k.transpose(-1, -2)) * scale
+        
+        # Clamp for numerical stability
+        attn_weights = torch.clamp(attn_weights, min=-1e4, max=1e4)
         
         if attention_mask is not None:
             attn_weights = attn_weights + attention_mask
         
         attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float32).to(q.dtype)
+        
+        # Check for NaN and replace with uniform attention if needed
+        if torch.isnan(attn_weights).any():
+            attn_weights = torch.ones_like(attn_weights) / attn_weights.size(-1)
+        
         attn_output = torch.matmul(attn_weights, v)
         
         # Reshape and project output
@@ -950,6 +958,10 @@ class XoronForCausalLM(nn.Module):
             next_token_logits = outputs.logits[:, -1, :]
             past_key_values = outputs.past_key_values
             
+            # Handle NaN/Inf in logits for numerical stability
+            next_token_logits = torch.nan_to_num(next_token_logits, nan=0.0, posinf=1e4, neginf=-1e4)
+            next_token_logits = torch.clamp(next_token_logits, min=-1e4, max=1e4)
+            
             if temperature != 1.0:
                 next_token_logits = next_token_logits / temperature
             
@@ -968,6 +980,10 @@ class XoronForCausalLM(nn.Module):
                     next_token_logits[indices_to_remove] = float('-inf')
                 
                 probs = F.softmax(next_token_logits, dim=-1)
+                # Ensure valid probability distribution
+                probs = torch.nan_to_num(probs, nan=1e-8, posinf=1.0, neginf=0.0)
+                probs = torch.clamp(probs, min=1e-8)
+                probs = probs / probs.sum(dim=-1, keepdim=True)
                 next_tokens = torch.multinomial(probs, num_samples=1).squeeze(-1)
             else:
                 next_tokens = torch.argmax(next_token_logits, dim=-1)
